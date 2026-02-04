@@ -66,20 +66,41 @@ with left:
     st.subheader("Yard View (v1)")
 
     # --- mock yard data (temporary) ---
-    # 120 stacks, height 0–5
     random.seed(7)
     stack_heights = [random.randint(0, 5) for _ in range(120)]
 
-    # Build a simple table for visualization
     yard_df = pd.DataFrame({
         "Stack": list(range(1, 121)),
         "Height": stack_heights
     })
 
-    # Show as a simple bar chart (fast + readable)
     st.bar_chart(yard_df.set_index("Stack")["Height"])
-
     st.caption("Each bar = one stack. Height = containers in stack (0–5). Mock data for UI scaffolding.")
+
+    st.divider()
+    st.subheader("Stack Inspector (mock)")
+
+    selected_stack = st.selectbox("Select stack", options=list(range(1, 121)), index=0)
+    height = stack_heights[selected_stack - 1]
+
+    # Create a mock container list (top -> bottom)
+    # Example: C000123 format
+    containers = [f"C{selected_stack:03d}-{i:02d}" for i in range(height, 0, -1)]  # top to bottom
+
+    # Show details
+    st.write(f"**Stack {selected_stack:03d}**  |  **Height:** {height} / 5")
+
+    if height == 0:
+        st.info("This stack is empty.")
+    else:
+        inspector_df = pd.DataFrame({
+            "Position (Top→Bottom)": list(range(1, height + 1)),
+            "Container ID (mock)": containers,
+            "Assigned Train (mock)": [random.choice(["06:00", "12:00", "18:00", "23:00"]) for _ in range(height)],
+            "Urgent? (mock)": [random.choice(["No", "No", "Yes"]) for _ in range(height)]
+        })
+        st.dataframe(inspector_df, use_container_width=True, hide_index=True)
+
 
 with right:
     st.subheader("Human Checkpoints (v1)")
