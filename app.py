@@ -1,6 +1,25 @@
 import streamlit as st
 import pandas as pd
 import random
+
+from datetime import timedelta
+
+
+# --------------------------------------------------
+# App state initialization
+# --------------------------------------------------
+
+TIME_STEP_MINUTES = 5
+
+def init_state():
+    st.session_state.sim_minute = 0
+    st.session_state.run_id = 1
+    st.session_state.seed = 7  # controls reproducible mock behavior
+
+if "sim_minute" not in st.session_state:
+    init_state()
+
+
 # --------------------------------------------------
 # Page configuration
 # --------------------------------------------------
@@ -33,27 +52,51 @@ with col2:
     )
 
 with col3:
-    st.metric("Simulation Time", "Day 1 — 00:00")
+    total_minutes = st.session_state.sim_minute
+    hours = (total_minutes // 60) % 24
+    minutes = total_minutes % 60
+    st.metric("Simulation Time", f"Day 1 — {hours:02d}:{minutes:02d}")
 
 with col4:
-    st.write("Controls")
-    st.button("Run")
-    st.button("Step")
-    st.button("Reset")
+    with col4:
+        st.write("Controls")
+
+        if st.button("Reset"):
+            init_state()
+            st.rerun()
+
+        if st.button("Step"):
+            st.session_state.sim_minute += TIME_STEP_MINUTES
+            st.rerun()
+
+        if st.button("Run"):
+            st.session_state.sim_minute += TIME_STEP_MINUTES
+            st.rerun()
+
 
 st.divider()
 
 # --------------------------------------------------
 # KPI Row (placeholders)
 # --------------------------------------------------
+# Mock KPIs that evolve with time (will become real later)
+random.seed(st.session_state.seed + st.session_state.sim_minute)
+
+rehandles_per = round(0.8 + random.random() * 2.2, 2)
+util = f"{random.randint(35, 95)}%"
+ontime = f"{random.randint(70, 99)}%"
+dwell = round(0.5 + random.random() * 10, 1)
+missed = random.randint(0, 45)
+recovery = "—" if scenario == "Baseline Day" else f"{random.randint(30, 240)} min"
+
 k1, k2, k3, k4, k5, k6 = st.columns(6)
 
-k1.metric("Rehandles / Container", "—")
-k2.metric("Yard Utilization", "—")
-k3.metric("On-Time %", "—")
-k4.metric("Avg Dwell (hrs)", "—")
-k5.metric("Missed Connections", "—")
-k6.metric("Recovery Time", "—")
+k1.metric("Rehandles / Container", rehandles_per)
+k2.metric("Yard Utilization", util)
+k3.metric("On-Time %", ontime)
+k4.metric("Avg Dwell (hrs)", dwell)
+k5.metric("Missed Connections", missed)
+k6.metric("Recovery Time", recovery)
 
 st.divider()
 
@@ -66,7 +109,7 @@ with left:
     st.subheader("Yard View (v1)")
 
     # --- mock yard data (temporary) ---
-    random.seed(7)
+    random.seed(st.session_state.seed + st.session_state.sim_minute)
     stack_heights = [random.randint(0, 5) for _ in range(120)]
 
     yard_df = pd.DataFrame({
@@ -105,7 +148,8 @@ with left:
 with right:
     st.subheader("Human Checkpoints (v1 – Queues)")
 
-    random.seed(21)
+    random.seed(21 + st.session_state.sim_minute)
+
 
     # Mock queues: list of container IDs waiting at each checkpoint
     arrival_buffer = [f"A-{i:04d}" for i in range(random.randint(5, 25))]
@@ -138,8 +182,11 @@ with right:
 # --------------------------------------------------
 st.subheader("Operations Timeline (v1 – Event Feed)")
 
-random.seed(99)
-current_time = "Day 1 — 00:00"
+random.seed(99 + st.session_state.sim_minute)
+total_minutes = st.session_state.sim_minute
+hours = (total_minutes // 60) % 24
+minutes = total_minutes % 60
+current_time = f"Day 1 — {hours:02d}:{minutes:02d}"
 
 events = [
     {"Time": current_time, "Type": "Arrival", "Detail": "12 containers arrived → arrival buffer"},
