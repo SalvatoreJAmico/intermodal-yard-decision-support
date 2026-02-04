@@ -103,29 +103,53 @@ with left:
 
 
 with right:
-    st.subheader("Human Checkpoints (v1)")
+    st.subheader("Human Checkpoints (v1 – Queues)")
 
-    # --- mock checkpoint data (temporary) ---
-    arrival_buffer = random.randint(0, 50)
-    confirmed_waiting = random.randint(0, 30)
-    staged = random.randint(0, 80)
-    departed = random.randint(0, 200)
+    random.seed(21)
+
+    # Mock queues: list of container IDs waiting at each checkpoint
+    arrival_buffer = [f"A-{i:04d}" for i in range(random.randint(5, 25))]
+    confirmed_waiting = [f"P-{i:04d}" for i in range(random.randint(3, 18))]
+    staged = [f"S-{i:04d}" for i in range(random.randint(10, 40))]
+    departed_count = random.randint(50, 250)
 
     c1, c2 = st.columns(2)
-    c1.metric("Arrival Buffer (Unconfirmed)", arrival_buffer)
-    c2.metric("Confirmed Waiting Placement", confirmed_waiting)
+    c1.metric("Arrival Buffer (Unconfirmed)", len(arrival_buffer))
+    c2.metric("Confirmed Waiting Placement", len(confirmed_waiting))
 
     c3, c4 = st.columns(2)
-    c3.metric("Staged (Ready to Load)", staged)
-    c4.metric("Loaded / Departed", departed)
+    c3.metric("Staged (Ready to Load)", len(staged))
+    c4.metric("Loaded / Departed", departed_count)
 
-    st.caption("Mock checkpoint counts. These will be wired to container states later.")
+    st.divider()
 
+    tabs = st.tabs(["Arrival Buffer", "Waiting Placement", "Staged"])
+    with tabs[0]:
+        st.dataframe({"Container (mock)": arrival_buffer}, use_container_width=True, hide_index=True)
+    with tabs[1]:
+        st.dataframe({"Container (mock)": confirmed_waiting}, use_container_width=True, hide_index=True)
+    with tabs[2]:
+        st.dataframe({"Container (mock)": staged}, use_container_width=True, hide_index=True)
 
-st.divider()
+    st.caption("Mock queue lists. These will be driven by container lifecycle states later.")
 
 # --------------------------------------------------
 # Timeline / Events
 # --------------------------------------------------
-st.subheader("Operations Timeline")
-st.info("Arrival, retrieval, staging, and departure events will appear here.")
+st.subheader("Operations Timeline (v1 – Event Feed)")
+
+random.seed(99)
+current_time = "Day 1 — 00:00"
+
+events = [
+    {"Time": current_time, "Type": "Arrival", "Detail": "12 containers arrived → arrival buffer"},
+    {"Time": current_time, "Type": "Arrival Confirm", "Detail": "8 containers confirmed (gate)"},
+    {"Time": current_time, "Type": "Placement", "Detail": "8 containers placed into yard stacks"},
+    {"Time": current_time, "Type": "Urgency Update", "Detail": "3 containers became urgent (<= 2h to departure)"},
+    {"Time": current_time, "Type": "Retrieval", "Detail": "2 containers retrieved → staging"},
+    {"Time": current_time, "Type": "Rehandle", "Detail": "4 rehandles occurred while unblocking urgent containers"},
+]
+
+st.dataframe(events, use_container_width=True, hide_index=True)
+
+st.caption("Mock event feed. This will later be generated directly from the simulation event log.")
