@@ -7,6 +7,8 @@ import random
 # --------------------------------------------------
 
 TIME_STEP_MINUTES = 5
+DEPARTURE_TOD_MINS = [360, 720, 1080, 1380]  # 06:00, 12:00, 18:00, 23:00
+URGENT_WINDOW_MINS = 120
 
 def init_state():
     st.session_state.sim_minute = 0
@@ -27,19 +29,60 @@ def init_state():
     st.session_state.train_capacity = 25          # max that can load per departure
     st.session_state.train_demand_per_departure = 28  # demand requested per departure
 
+    # NEW: urgency tracking
+    st.session_state.urgent_window = False
+    st.session_state.prev_urgent_window = False
+    st.session_state.mins_to_next_departure = None
+    st.session_state.next_departure_label = None
+
 if "sim_minute" not in st.session_state:
     init_state()
+
+
+def minutes_to_next_departure(sim_minute: int) -> int:
+    tod = sim_minute % 1440  # minutes since midnight
+    for d in DEPARTURE_TOD_MINS:
+        if d > tod:
+            return d - tod
+    # next day 06:00
+    return (1440 - tod) + DEPARTURE_TOD_MINS[0]
+
+def next_departure_label(sim_minute: int) -> str:
+    tod = sim_minute % 1440
+    for d in DEPARTURE_TOD_MINS:
+        if d > tod:
+            hh = d // 60
+            mm = d % 60
+            return f"{hh:02d}:{mm:02d}"
+    return "06:00"
+
 
 
 # --------------------------------------------------
 # Deterministic flow model (v2)
 # --------------------------------------------------
-def step_flow(scenario_value: str):
+def step_flow(scenario_value: str, strategy_value: str):
     """
     Deterministic flow model (v2):
     arrivals -> confirm -> placement -> staging -> departure/missed at scheduled times
     """
     events = []
+
+    # ----- Urgency computation -----
+    sim_minute = st.session_state.sim_minute
+    mins_to_dep = minutes_to_next_departure(sim_minute)
+    dep_label = next_departure_label(sim_minute)
+    urgent_window = mins_to_dep <= URGENT_WINDOW_MINS
+
+    st.session_state.mins_to_next_departure = mins_to_dep
+    st.session_state.next_departure_label = dep_label
+    st.session_state.urgent_window = urgent_window
+
+    # Log urgency window transitions (once on entry)
+    if urgent_window and not st.session_state.prev_urgent_window:
+        events.append(("Urgency", f"Urgency window OPEN: T–{mins_to_dep} min to {dep_label} departure"))
+    st.session_state.prev_urgent_window = urgent_window
+
 
     # Scenario tuning (simple)
     if scenario_value == "Port Surge":
@@ -56,6 +99,14 @@ def step_flow(scenario_value: str):
         confirms_per_step = 2
         placements_per_step = 2
         stage_per_step = 2
+
+
+    # ----- Strategy: urgency-aware throughput boost -----
+    if strategy_value == "Urgency-Aware (Planned)" and urgent_window:
+        placements_per_step += 1
+        stage_per_step += 1
+        events.append(("Strategy", "Urgency-Aware boost applied (+1 placement, +1 staging)"))
+
 
     # Arrivals
     st.session_state.arrival_buffer_count += arrivals_per_step
@@ -153,12 +204,12 @@ with col4:
 
     if st.button("Step"):
         st.session_state.sim_minute += TIME_STEP_MINUTES
-        step_flow(scenario)
+        step_flow(scenario, strategy)
         st.rerun()
 
     if st.button("Run"):
         st.session_state.sim_minute += TIME_STEP_MINUTES
-        step_flow(scenario)
+        step_flow(scenario, strategy)
         st.rerun()
 
 
