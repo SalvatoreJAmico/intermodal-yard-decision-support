@@ -13,9 +13,71 @@ def init_state():
     st.session_state.run_id = 1
     st.session_state.seed = 7  # controls reproducible mock behavior
 
+    # Deterministic flow counters (v2)
+    st.session_state.arrival_buffer_count = 12
+    st.session_state.confirmed_waiting_count = 8
+    st.session_state.staged_count = 20
+    st.session_state.departed_total = 0
+    st.session_state.last_events = []
+
+
 if "sim_minute" not in st.session_state:
     init_state()
 
+
+# --------------------------------------------------
+# Deterministic flow model (v2)
+# --------------------------------------------------
+def step_flow():
+    """
+    Deterministic flow model for v2:
+    arrivals -> confirm -> placement -> staging -> departure
+    """
+    events = []
+
+    # Tune these rates later / tie to scenario
+    arrivals_per_step = 3
+    confirms_per_step = 2
+    placements_per_step = 2
+    stage_per_step = 2
+    depart_per_step = 2
+
+    # Arrivals
+    st.session_state.arrival_buffer_count += arrivals_per_step
+    events.append(("Arrival", f"+{arrivals_per_step} arrived → arrival buffer"))
+
+    # Confirm (gate)
+    confirmed = min(confirms_per_step, st.session_state.arrival_buffer_count)
+    st.session_state.arrival_buffer_count -= confirmed
+    st.session_state.confirmed_waiting_count += confirmed
+    events.append(("Arrival Confirm", f"{confirmed} confirmed (gate)"))
+
+    # Placement
+    placed = min(placements_per_step, st.session_state.confirmed_waiting_count)
+    st.session_state.confirmed_waiting_count -= placed
+    events.append(("Placement", f"{placed} placed into yard stacks"))
+
+    # Staging (retrieval)
+    staged_now = min(stage_per_step, placed)
+    st.session_state.staged_count += staged_now
+    events.append(("Retrieval", f"{staged_now} retrieved → staging"))
+
+    # Departures at scheduled times (06:00, 12:00, 18:00, 23:00)
+    # For now: if exactly at those times, depart up to depart_per_step
+    total_minutes = st.session_state.sim_minute
+    hh = (total_minutes // 60) % 24
+    mm = total_minutes % 60
+    is_departure_time = (mm == 0) and (hh in [6, 12, 18, 23])
+
+    if is_departure_time:
+        departed = min(depart_per_step, st.session_state.staged_count)
+        st.session_state.staged_count -= departed
+        st.session_state.departed_total += departed
+        events.append(("Departure", f"{departed} loaded/departed at {hh:02d}:00"))
+    else:
+        departed = 0
+
+    st.session_state.last_events = events
 
 # --------------------------------------------------
 # Page configuration
@@ -64,10 +126,12 @@ with col4:
 
     if st.button("Step"):
         st.session_state.sim_minute += TIME_STEP_MINUTES
+        step_flow()
         st.rerun()
 
     if st.button("Run"):
         st.session_state.sim_minute += TIME_STEP_MINUTES
+        step_flow()
         st.rerun()
 
 
@@ -96,8 +160,6 @@ k5.metric("Missed Connections", missed)
 k6.metric("Recovery Time", recovery)
 
 st.divider()
-
-
 
 
 # --------------------------------------------------
@@ -150,12 +212,11 @@ with right:
 
     random.seed(21 + st.session_state.sim_minute)
 
-
-    # Mock queues: list of container IDs waiting at each checkpoint
-    arrival_buffer = [f"A-{i:04d}" for i in range(random.randint(5, 25))]
-    confirmed_waiting = [f"P-{i:04d}" for i in range(random.randint(3, 18))]
-    staged = [f"S-{i:04d}" for i in range(random.randint(10, 40))]
-    departed_count = random.randint(50, 250)
+    # real flow model.
+    arrival_buffer = [f"A-{i:04d}" for i in range(st.session_state.arrival_buffer_count)]
+    confirmed_waiting = [f"P-{i:04d}" for i in range(st.session_state.confirmed_waiting_count)]
+    staged = [f"S-{i:04d}" for i in range(st.session_state.staged_count)]
+    departed_count = st.session_state.departed_total
 
     c1, c2 = st.columns(2)
     c1.metric("Arrival Buffer (Unconfirmed)", len(arrival_buffer))
@@ -189,14 +250,12 @@ minutes = total_minutes % 60
 current_time = f"Day 1 — {hours:02d}:{minutes:02d}"
 
 events = [
-    {"Time": current_time, "Type": "Arrival", "Detail": "12 containers arrived → arrival buffer"},
-    {"Time": current_time, "Type": "Arrival Confirm", "Detail": "8 containers confirmed (gate)"},
-    {"Time": current_time, "Type": "Placement", "Detail": "8 containers placed into yard stacks"},
-    {"Time": current_time, "Type": "Urgency Update", "Detail": "3 containers became urgent (<= 2h to departure)"},
-    {"Time": current_time, "Type": "Retrieval", "Detail": "2 containers retrieved → staging"},
-    {"Time": current_time, "Type": "Rehandle", "Detail": "4 rehandles occurred while unblocking urgent containers"},
+    {"Time": current_time, "Type": t, "Detail": d}
+    for (t, d) in st.session_state.last_events
 ]
 
 st.dataframe(events, use_container_width=True, hide_index=True)
 
-st.caption("Mock event feed. This will later be generated directly from the simulation event log.")
+st.caption(
+    "Event feed shows the operations generated during the most recent simulation step."
+)
