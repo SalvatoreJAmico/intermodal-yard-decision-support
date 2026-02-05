@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import random
+from datetime import datetime
 
 # --------------------------------------------------
 # App state initialization
@@ -9,9 +10,16 @@ import random
 TIME_STEP_MINUTES = 5
 DEPARTURE_TOD_MINS = [360, 720, 1080, 1380]  # 06:00, 12:00, 18:00, 23:00
 URGENT_WINDOW_MINS = 120
+RUN_STEPS_PER_CLICK = 12  # 12 * 5min = 60 minutes
+
 
 def init_state():
-    st.session_state.sim_minute = 0
+
+    now = datetime.now()
+    st.session_state.sim_minute = now.hour * 60 + now.minute
+    st.session_state.sim_second_offset = now.second
+    st.session_state.sim_start_date = now.date()
+
     st.session_state.run_id = 1
     st.session_state.seed = 7  # controls reproducible mock behavior
 
@@ -34,6 +42,9 @@ def init_state():
     st.session_state.prev_urgent_window = False
     st.session_state.mins_to_next_departure = None
     st.session_state.next_departure_label = None
+
+    st.session_state.cancelled_departures = 0
+
 
 if "sim_minute" not in st.session_state:
     init_state()
@@ -137,23 +148,23 @@ def step_flow(scenario_value: str, strategy_value: str):
     is_departure_time = (mm == 0) and (hh in departure_hours)
 
     if is_departure_time:
-        demand = st.session_state.train_demand_per_departure
-        capacity = st.session_state.train_capacity
+        if scenario_value == "Train Cancelled":
+            st.session_state.cancelled_departures += 1
+            events.append(("Train Cancelled", f"Departure at {hh:02d}:00 cancelled — no loading"))
+        else:
+            demand = st.session_state.train_demand_per_departure
+            capacity = st.session_state.train_capacity
 
-        # Load from staging
-        loadable = min(st.session_state.staged_count, capacity)
-        st.session_state.staged_count -= loadable
-        st.session_state.departed_total += loadable
-        events.append(("Departure", f"{loadable} loaded/departed at {hh:02d}:00 (cap {capacity})"))
+            loadable = min(st.session_state.staged_count, capacity)
+            st.session_state.staged_count -= loadable
+            st.session_state.departed_total += loadable
+            events.append(("Departure", f"{loadable} loaded/departed at {hh:02d}:00 (cap {capacity})"))
 
-        # Missed connections if demand not met
-        missed = max(0, demand - loadable)
-        if missed > 0:
-            st.session_state.missed_total += missed
-            events.append(("Missed Connection", f"{missed} missed at {hh:02d}:00 (demand {demand}, staged shortage)"))
-    else:
-        # Optional: note upcoming departures later (not needed now)
-        pass
+            missed = max(0, demand - loadable)
+            if missed > 0:
+                st.session_state.missed_total += missed
+                events.append(("Missed Connection", f"{missed} missed at {hh:02d}:00 (demand {demand}, staged shortage)"))
+
 
     st.session_state.last_events = events
 
@@ -192,25 +203,35 @@ with col3:
     total_minutes = st.session_state.sim_minute
     hours = (total_minutes // 60) % 24
     minutes = total_minutes % 60
-    st.metric("Simulation Time", f"Day 1 — {hours:02d}:{minutes:02d}")
+    seconds = st.session_state.sim_second_offset
+    sim_date = st.session_state.sim_start_date
+
+    st.metric(
+        "Simulation Time",
+        f"{sim_date} — {hours:02d}:{minutes:02d}:{seconds:02d}"
+    )
+
 
 
 with col4:
-    st.write("Controls")
+    st.markdown("### 🧪 Simulation Controls")
+    st.caption("For testing and demonstration only. In production, the system runs continuously.")
 
-    if st.button("Reset"):
+    if st.button("Reset Simulation"):
         init_state()
         st.rerun()
 
-    if st.button("Step"):
+    if st.button("Step (5 min)"):
         st.session_state.sim_minute += TIME_STEP_MINUTES
         step_flow(scenario, strategy)
         st.rerun()
 
-    if st.button("Run"):
-        st.session_state.sim_minute += TIME_STEP_MINUTES
-        step_flow(scenario, strategy)
+    if st.button("Run (1 hour)"):
+        for _ in range(RUN_STEPS_PER_CLICK):
+            st.session_state.sim_minute += TIME_STEP_MINUTES
+            step_flow(scenario, strategy)
         st.rerun()
+
 
 
 st.divider()
@@ -295,14 +316,47 @@ with right:
     confirmed_waiting = [f"P-{i:04d}" for i in range(st.session_state.confirmed_waiting_count)]
     staged = [f"S-{i:04d}" for i in range(st.session_state.staged_count)]
     departed_count = st.session_state.departed_total
+    
+    urgent_backlog = (
+    len(staged)
+    if st.session_state.urgent_window
+    else 0
+)
+
+
+
+
 
     c1, c2 = st.columns(2)
+
+
     c1.metric("Arrival Buffer (Unconfirmed)", len(arrival_buffer))
     c2.metric("Confirmed Waiting Placement", len(confirmed_waiting))
 
     c3, c4 = st.columns(2)
+
     c3.metric("Staged (Ready to Load)", len(staged))
     c4.metric("Loaded / Departed", departed_count)
+
+    c5, c6 = st.columns(2)
+
+    c5.metric(
+        "Urgent Backlog",
+        urgent_backlog,
+        help="Staged containers at risk for the next scheduled departure"
+    )
+
+    c6.metric(
+        "Cancelled Departures",
+        st.session_state.cancelled_departures,
+        help="Scheduled trains that did not run"
+    )
+
+    st.caption(
+    f"Next departure: {st.session_state.next_departure_label} "
+    f"(T–{st.session_state.mins_to_next_departure} min)"
+)
+
 
     st.divider()
 
