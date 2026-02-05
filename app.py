@@ -2,9 +2,6 @@ import streamlit as st
 import pandas as pd
 import random
 
-from datetime import timedelta
-
-
 # --------------------------------------------------
 # App state initialization
 # --------------------------------------------------
@@ -57,21 +54,21 @@ with col3:
     minutes = total_minutes % 60
     st.metric("Simulation Time", f"Day 1 — {hours:02d}:{minutes:02d}")
 
+
 with col4:
-    with col4:
-        st.write("Controls")
+    st.write("Controls")
 
-        if st.button("Reset"):
-            init_state()
-            st.rerun()
+    if st.button("Reset"):
+        init_state()
+        st.rerun()
 
-        if st.button("Step"):
-            st.session_state.sim_minute += TIME_STEP_MINUTES
-            st.rerun()
+    if st.button("Step"):
+        st.session_state.sim_minute += TIME_STEP_MINUTES
+        st.rerun()
 
-        if st.button("Run"):
-            st.session_state.sim_minute += TIME_STEP_MINUTES
-            st.rerun()
+    if st.button("Run"):
+        st.session_state.sim_minute += TIME_STEP_MINUTES
+        st.rerun()
 
 
 st.divider()
@@ -99,6 +96,9 @@ k5.metric("Missed Connections", missed)
 k6.metric("Recovery Time", recovery)
 
 st.divider()
+
+
+
 
 # --------------------------------------------------
 # Main panels
