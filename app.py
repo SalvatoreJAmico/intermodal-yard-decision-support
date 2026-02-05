@@ -20,6 +20,12 @@ def init_state():
     st.session_state.departed_total = 0
     st.session_state.last_events = []
 
+    # NEW: missed connection tracking
+    st.session_state.missed_total = 0
+
+    # NEW: simple train model (edit later)
+    st.session_state.train_capacity = 25          # max that can load per departure
+    st.session_state.train_demand_per_departure = 28  # demand requested per departure
 
 if "sim_minute" not in st.session_state:
     init_state()
@@ -28,19 +34,28 @@ if "sim_minute" not in st.session_state:
 # --------------------------------------------------
 # Deterministic flow model (v2)
 # --------------------------------------------------
-def step_flow():
+def step_flow(scenario_value: str):
     """
-    Deterministic flow model for v2:
-    arrivals -> confirm -> placement -> staging -> departure
+    Deterministic flow model (v2):
+    arrivals -> confirm -> placement -> staging -> departure/missed at scheduled times
     """
     events = []
 
-    # Tune these rates later / tie to scenario
-    arrivals_per_step = 3
-    confirms_per_step = 2
-    placements_per_step = 2
-    stage_per_step = 2
-    depart_per_step = 2
+    # Scenario tuning (simple)
+    if scenario_value == "Port Surge":
+        arrivals_per_step = 5
+    else:
+        arrivals_per_step = 3
+
+    if scenario_value == "Crane Down":
+        # fewer placements/staging during crane outage scenario
+        confirms_per_step = 2
+        placements_per_step = 1
+        stage_per_step = 1
+    else:
+        confirms_per_step = 2
+        placements_per_step = 2
+        stage_per_step = 2
 
     # Arrivals
     st.session_state.arrival_buffer_count += arrivals_per_step
@@ -55,27 +70,39 @@ def step_flow():
     # Placement
     placed = min(placements_per_step, st.session_state.confirmed_waiting_count)
     st.session_state.confirmed_waiting_count -= placed
-    events.append(("Placement", f"{placed} placed into yard stacks"))
+    events.append(("Placement", f"{placed} approved/placed into yard stacks"))
 
     # Staging (retrieval)
     staged_now = min(stage_per_step, placed)
     st.session_state.staged_count += staged_now
     events.append(("Retrieval", f"{staged_now} retrieved → staging"))
 
-    # Departures at scheduled times (06:00, 12:00, 18:00, 23:00)
-    # For now: if exactly at those times, depart up to depart_per_step
+    # ----- Departure logic -----
     total_minutes = st.session_state.sim_minute
     hh = (total_minutes // 60) % 24
     mm = total_minutes % 60
-    is_departure_time = (mm == 0) and (hh in [6, 12, 18, 23])
+
+    departure_hours = [6, 12, 18, 23]
+    is_departure_time = (mm == 0) and (hh in departure_hours)
 
     if is_departure_time:
-        departed = min(depart_per_step, st.session_state.staged_count)
-        st.session_state.staged_count -= departed
-        st.session_state.departed_total += departed
-        events.append(("Departure", f"{departed} loaded/departed at {hh:02d}:00"))
+        demand = st.session_state.train_demand_per_departure
+        capacity = st.session_state.train_capacity
+
+        # Load from staging
+        loadable = min(st.session_state.staged_count, capacity)
+        st.session_state.staged_count -= loadable
+        st.session_state.departed_total += loadable
+        events.append(("Departure", f"{loadable} loaded/departed at {hh:02d}:00 (cap {capacity})"))
+
+        # Missed connections if demand not met
+        missed = max(0, demand - loadable)
+        if missed > 0:
+            st.session_state.missed_total += missed
+            events.append(("Missed Connection", f"{missed} missed at {hh:02d}:00 (demand {demand}, staged shortage)"))
     else:
-        departed = 0
+        # Optional: note upcoming departures later (not needed now)
+        pass
 
     st.session_state.last_events = events
 
@@ -126,12 +153,12 @@ with col4:
 
     if st.button("Step"):
         st.session_state.sim_minute += TIME_STEP_MINUTES
-        step_flow()
+        step_flow(scenario)
         st.rerun()
 
     if st.button("Run"):
         st.session_state.sim_minute += TIME_STEP_MINUTES
-        step_flow()
+        step_flow(scenario)
         st.rerun()
 
 
@@ -147,7 +174,7 @@ rehandles_per = round(0.8 + random.random() * 2.2, 2)
 util = f"{random.randint(35, 95)}%"
 ontime = f"{random.randint(70, 99)}%"
 dwell = round(0.5 + random.random() * 10, 1)
-missed = random.randint(0, 45)
+missed = st.session_state.missed_total
 recovery = "—" if scenario == "Baseline Day" else f"{random.randint(30, 240)} min"
 
 k1, k2, k3, k4, k5, k6 = st.columns(6)
@@ -210,7 +237,7 @@ with left:
 with right:
     st.subheader("Human Checkpoints (v1 – Queues)")
 
-    random.seed(21 + st.session_state.sim_minute)
+    
 
     # real flow model.
     arrival_buffer = [f"A-{i:04d}" for i in range(st.session_state.arrival_buffer_count)]
